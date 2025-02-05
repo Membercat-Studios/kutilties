@@ -12,6 +12,9 @@ const config = {
   logging: {
     channel: "1288652816830959617",
   },
+  modmail: {
+    channel: "1336549338972946462",
+  },
   membercat: {
     updater: {
       channel: "1288652816830959617",

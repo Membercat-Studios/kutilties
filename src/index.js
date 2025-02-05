@@ -6,6 +6,7 @@ const {
   REST,
   Routes,
   Collection,
+  Partials,
 } = require("discord.js");
 const logger = require("@logger");
 const fs = require("fs");
@@ -24,7 +25,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessageTyping,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.DirectMessages,
   ],
+  partials: [Partials.Channel, Partials.Message],
 });
 
 (async () => {
@@ -53,11 +56,11 @@ const readCommands = (dir) => {
 
     if (stat.isDirectory()) {
       readCommands(filePath);
-    } else if (file.startsWith("!") || file.startsWith("-")) {
-      // ignore files that start with "!" or "-"
+    } else if (file.startsWith("!")) {
       logger.warn(`Skipping "${file}" as it is marked as an exclusion.`);
     } else if (file.endsWith(".js")) {
       const command = require(filePath);
+
       if ("data" in command && "execute" in command) {
         client.commands.set(command.data.name, command);
         logger.success(`Registered command "${command.data.name}"`);

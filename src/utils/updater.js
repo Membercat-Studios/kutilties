@@ -130,7 +130,7 @@ function createUpdateEmbed(project, versionData, client) {
   try {
     if (
       !project ||
-      !project.title ||
+      !project.name ||
       !versionData ||
       !versionData.version_number
     ) {
@@ -138,9 +138,9 @@ function createUpdateEmbed(project, versionData, client) {
     }
 
     return new EmbedBuilder()
-      .setTitle(project.title)
+      .setTitle(project.name)
       .setDescription(
-        `${project.title} was updated to ${versionData.version_number}! Go and update now!`
+        `${project.name} was updated to ${versionData.version_number}! Go and update now!`
       )
       .setColor(config.bot.color)
       .setFooter({
