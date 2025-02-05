@@ -3,7 +3,12 @@ const logger = require("@logger");
 const Project = require("@models/Projects");
 const config = require("@config/general");
 const cache = require("@cache");
-const { EmbedBuilder } = require("discord.js");
+const {
+  EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+} = require("discord.js");
 
 const modrinth = axios.create({
   baseURL: "https://api.modrinth.com/v3",
@@ -120,6 +125,13 @@ async function notify(client, project) {
     await channel.send({
       content: `<@&${config.membercat.updater.pingRole}>`,
       embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel("View on Modrinth")
+            .setURL(latestVersion.files[0].url)
+        ),
+      ],
     });
   } catch (error) {
     logger.error(`Failed to send notification: ${error.message}`);
@@ -161,7 +173,7 @@ function createUpdateEmbed(project, versionData, client) {
         },
         {
           name: "Download",
-          value: `[Download](${versionData.files[0].url})`,
+          value: `[Modrinth](${versionData.files[0].url})`,
           inline: false,
         },
       ]);

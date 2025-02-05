@@ -70,17 +70,30 @@ module.exports = {
     const cmd = interaction.options.getSubcommand();
 
     try {
+      const modmail = new Modmail(client);
       if (cmd === "open") {
-        const modmail = new Modmail(client);
+        if (!client.modmailCooldowns) {
+          client.modmailCooldowns = new Map();
+        }
+
+        const cooldownTime = 5000;
+        const currentTime = Date.now();
+        const userCooldown = client.modmailCooldowns.get(interaction.user.id);
+
+        if (userCooldown && currentTime - userCooldown < cooldownTime) {
+          return interaction.reply({
+            content: "Please wait some time before sending another command.",
+            ephemeral: true,
+          });
+        }
+
+        client.modmailCooldowns.set(interaction.user.id, currentTime);
         await modmail.open(interaction, client);
       } else if (cmd === "close") {
-        const modmail = new Modmail(client);
         await modmail.close(interaction);
       } else if (cmd === "respond") {
-        const modmail = new Modmail(client);
         await modmail.respond(interaction);
       } else if (cmd === "resolve") {
-        const modmail = new Modmail(client);
         await modmail.resolve(interaction);
       }
     } catch (error) {
