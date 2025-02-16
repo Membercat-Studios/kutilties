@@ -1,20 +1,20 @@
 require("dotenv").config();
 require("module-alias/register");
+
 const {
   Client,
   GatewayIntentBits,
   REST,
   Routes,
   Collection,
+  Map,
   Partials,
 } = require("discord.js");
 const logger = require("@logger");
 const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
-const eventsDir = path.join(__dirname, "/events");
-const commandsDir = path.join(__dirname, "/commands");
-const eventFolders = fs.readdirSync(eventsDir);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -29,6 +29,11 @@ const client = new Client({
   ],
   partials: [Partials.Channel, Partials.Message],
 });
+client.commandsSinceLastStartup = new Map();
+
+const eventsDir = path.join(__dirname, "/events");
+const commandsDir = path.join(__dirname, "/commands");
+const eventFolders = fs.readdirSync(path.join(__dirname, "/events"));
 
 (async () => {
   logger.info("Connecting to Database...");
@@ -128,6 +133,10 @@ client.on("interactionCreate", async (interaction) => {
     await command.execute(interaction, client);
     logger.info(
       `${interaction.user.username} executed command /${interaction.commandName}`
+    );
+    commandsSinceLastStartup.set(
+      new Date().toISOString(),
+      interaction.commandName
     );
   } catch (error) {
     logger.error(error);

@@ -9,6 +9,7 @@ const {
   ButtonStyle,
   ActionRowBuilder,
 } = require("discord.js");
+const Settings = require("@models/Settings");
 
 const modrinth = axios.create({
   baseURL: "https://api.modrinth.com/v3",
@@ -106,12 +107,15 @@ async function processProject(project, projectsDoc, client) {
 
 async function notify(client, project) {
   try {
-    const channelKey = CACHE_KEYS.CHANNEL(config.membercat.updater.channel);
+    const settings = await Settings.findOne();
+    if (!settings) return logger.error("Settings not found");
+
+    const channelKey = CACHE_KEYS.CHANNEL(settings.membercat.updater.channel);
     let channel = cache.get(channelKey);
 
     if (!channel) {
       channel = await client.channels.cache.get(
-        config.membercat.updater.channel
+        settings.membercat.updater.channel
       );
       if (!channel) return logger.error("Notification channel not found");
       cache.set(channelKey, channel, 60 * 1000 * 10);
@@ -120,15 +124,16 @@ async function notify(client, project) {
     const latestVersion = await getLatestVersion(project.id);
     if (!latestVersion) return logger.error("Failed to get latest version");
 
-    const embed = createUpdateEmbed(project, latestVersion, client);
+    const embed = createUpdateEmbed(project, latestVersion, client, settings);
 
     await channel.send({
-      content: `<@&${config.membercat.updater.pingRole}>`,
+      content: `<@&${settings.membercat.updater.pingRole}>`,
       embeds: [embed],
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setLabel("View on Modrinth")
+            .setStyle(ButtonStyle.Link)
             .setURL(latestVersion.files[0].url)
         ),
       ],
@@ -138,7 +143,7 @@ async function notify(client, project) {
   }
 }
 
-function createUpdateEmbed(project, versionData, client) {
+function createUpdateEmbed(project, versionData, client, settings) {
   try {
     if (
       !project ||
@@ -154,9 +159,9 @@ function createUpdateEmbed(project, versionData, client) {
       .setDescription(
         `${project.name} was updated to ${versionData.version_number}! Go and update now!`
       )
-      .setColor(config.bot.color)
+      .setColor(settings.bot.color)
       .setFooter({
-        text: config.bot.footer.text,
+        text: settings.bot.footer.text,
         iconURL: client.user.displayAvatarURL({ dynamic: true }),
       })
       .setTimestamp(new Date(project.updated))

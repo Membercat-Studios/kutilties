@@ -16,7 +16,8 @@
     "discord.js": "^14.17.3",
     "dotenv": "^16.4.7",
     "module-alias": "^2.2.3",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "eslint": "^9.19.0"

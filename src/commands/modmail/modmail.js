@@ -1,14 +1,16 @@
-const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-} = require("discord.js");
-const { Settings } = require("../../models/Settings");
+const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const Settings = require("@models/Settings");
+const Modmail = require("@models/Modmail");
 const logger = require("@logger");
+const ModmailUtil = require("@utils/modmail");
+const { hasPermissions } = require("@utils/permissions");
 const cache = require("@cache");
-const Modmail = require("../../utils/modmail");
+
+const CACHE_KEYS = {
+  SETTINGS: "settings_data",
+  MODMAIL_DOC: (guildId) => `modmail_doc_${guildId}`,
+  USER_COOLDOWN: (userId) => `modmail_cooldown_${userId}`,
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -65,36 +67,122 @@ module.exports = {
             .setDescription("The resolution message")
             .setRequired(true)
         )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("ban")
+        .setDescription("Ban a user from using modmail")
+        .addUserOption((option) =>
+          option
+            .setName("user")
+            .setDescription("The user to ban from modmail")
+            .setRequired(true)
+        )
+        .addStringOption((option) =>
+          option
+            .setName("reason")
+            .setDescription("The reason for the ban")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("unban")
+        .setDescription("Unban a user from modmail")
+        .addUserOption((option) =>
+          option
+            .setName("user")
+            .setDescription("The user to unban from modmail")
+            .setRequired(true)
+        )
     ),
   async execute(interaction, client) {
     const cmd = interaction.options.getSubcommand();
 
     try {
-      const modmail = new Modmail(client);
+      let settings = cache.get(CACHE_KEYS.SETTINGS);
+      let modmailDoc = cache.get(CACHE_KEYS.MODMAIL_DOC(interaction.guild.id));
+
+      if (!settings || !modmailDoc) {
+        [settings, modmailDoc] = await Promise.all([
+          Settings.findOne(),
+          Modmail.findOne({ guildId: interaction.guild.id }),
+        ]);
+
+        if (settings) {
+          cache.set(CACHE_KEYS.SETTINGS, settings, 5 * 60 * 1000);
+        }
+        if (modmailDoc) {
+          cache.set(
+            CACHE_KEYS.MODMAIL_DOC(interaction.guild.id),
+            modmailDoc,
+            5 * 60 * 1000
+          );
+        }
+      }
+
+      if (!settings || !modmailDoc) {
+        return interaction.reply({
+          content:
+            "Unable to continue, please alert an admin or check the bot console!",
+          ephemeral: true,
+        });
+      }
+
+      const modmail = new ModmailUtil(client);
+
       if (cmd === "open") {
-        if (!client.modmailCooldowns) {
-          client.modmailCooldowns = new Map();
+        const currentTime = Date.now();
+        const cooldownKey = CACHE_KEYS.USER_COOLDOWN(interaction.user.id);
+        let lastUsed = cache.get(cooldownKey);
+
+        if (!lastUsed) {
+          lastUsed = modmailDoc.cooldowns.get(interaction.user.id);
+          if (lastUsed) {
+            cache.set(
+              cooldownKey,
+              lastUsed,
+              settings.modmail.cooldownSeconds * 1000
+            );
+          }
         }
 
-        const cooldownTime = 5000;
-        const currentTime = Date.now();
-        const userCooldown = client.modmailCooldowns.get(interaction.user.id);
+        const cooldownMs = settings.modmail.cooldownSeconds * 1000;
 
-        if (userCooldown && currentTime - userCooldown < cooldownTime) {
+        if (lastUsed && currentTime - lastUsed.getTime() < cooldownMs) {
+          const nextAvailableTime = Math.floor(
+            (lastUsed.getTime() + cooldownMs) / 1000
+          );
           return interaction.reply({
-            content: "Please wait some time before sending another command.",
+            content: `You can create another modmail <t:${nextAvailableTime}:R>`,
             ephemeral: true,
           });
         }
 
-        client.modmailCooldowns.set(interaction.user.id, currentTime);
+        const newCooldown = new Date();
+        cache.set(cooldownKey, newCooldown, cooldownMs);
+        modmailDoc.cooldowns.set(interaction.user.id, newCooldown);
+
+        cache.set(
+          CACHE_KEYS.MODMAIL_DOC(interaction.guild.id),
+          modmailDoc,
+          5 * 60 * 1000
+        );
+
+        await modmailDoc.save();
         await modmail.open(interaction, client);
       } else if (cmd === "close") {
         await modmail.close(interaction);
+        cache.delete(CACHE_KEYS.MODMAIL_DOC(interaction.guild.id));
       } else if (cmd === "respond") {
         await modmail.respond(interaction);
       } else if (cmd === "resolve") {
         await modmail.resolve(interaction);
+        cache.delete(CACHE_KEYS.MODMAIL_DOC(interaction.guild.id));
+      } else if (cmd === "ban") {
+        await modmail.ban(interaction);
+      } else if (cmd === "unban") {
+        await modmail.unban(interaction);
       }
     } catch (error) {
       logger.error(error);

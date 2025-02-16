@@ -1,20 +1,29 @@
 const ModmailSchema = require("../models/Modmail");
-const { EmbedBuilder } = require("discord.js");
-
+const { EmbedBuilder, PermissionFlagsBits } = require("discord.js");
+const { hasPermissions } = require("@utils/permissions");
 const config = require("@config/general");
 const logger = require("@logger");
 const cache = require("@cache");
+const Settings = require("@models/Settings");
 
 class Modmail {
   constructor(client) {
     this.client = client;
     this.CACHE_TTL = 300; // 5 minutes in seconds
+    this.STAFF_PERMISSIONS = [
+      PermissionFlagsBits.ManageMessages,
+      PermissionFlagsBits.ModerateMembers,
+    ];
   }
 
   async open(interaction, client) {
     try {
       const subject = interaction.options.getString("subject");
       const message = interaction.options.getString("message");
+
+      const settings = await Settings.findOne({
+        guildId: interaction.guild.id,
+      });
 
       let modmail = await ModmailSchema.findOne({
         guildId: interaction.guild.id,
@@ -28,9 +37,19 @@ class Modmail {
         });
       }
 
-      const existingOpenModmail = modmail.modmails.find(
-        (m) => m.author === interaction.user.id && m.status === "open"
+      const isBanned = modmail.banned.find(
+        (ban) => ban.id === interaction.user.id
       );
+      if (isBanned) {
+        return interaction.reply({
+          content: `You are banned from using modmail.\nReason: ${
+            isBanned.reason
+          }\nBanned by: <@${isBanned.moderator}>\nBanned at: <t:${Math.floor(
+            isBanned.bannedAt.getTime() / 1000
+          )}:F>`,
+          ephemeral: true,
+        });
+      }
 
       if (existingOpenModmail) {
         return interaction.reply({
@@ -72,8 +91,8 @@ class Modmail {
           },
         ])
         .setFooter({
-          text: `User ID: ${interaction.user.id}`,
-          iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
+          text: settings.bot.footer.text,
+          iconURL: client.user.displayAvatarURL({ dynamic: true }),
         })
         .setTimestamp();
 
@@ -136,7 +155,7 @@ class Modmail {
           },
         ])
         .setFooter({
-          text: "Your messages will be forwarded to the staff team",
+          text: settings.bot.footer.text,
           iconURL: client.user.displayAvatarURL({ dynamic: true }),
         })
         .setTimestamp();
@@ -169,7 +188,7 @@ class Modmail {
           },
         ])
         .setFooter({
-          text: config.bot.footer.text,
+          text: settings.bot.footer.text,
           iconURL: client.user.displayAvatarURL({ dynamic: true }),
         })
         .setTimestamp();
@@ -189,9 +208,19 @@ class Modmail {
 
   async close(interaction) {
     try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
+
       await interaction.deferReply({ ephemeral: true });
 
       const threadId = interaction.channel.id;
+
+      const settings = await Settings.findOne({
+        guildId: interaction.guild.id,
+      });
 
       let modmail = await ModmailSchema.findOne({
         guildId: interaction.guild.id,
@@ -245,6 +274,10 @@ class Modmail {
         .setTitle("📪 Modmail Closed")
         .setDescription(`Modmail closed by ${interaction.user}`)
         .setColor("Red")
+        .setFooter({
+          text: settings.bot.footer.text,
+          iconURL: client.user.displayAvatarURL({ dynamic: true }),
+        })
         .setTimestamp();
 
       await interaction.channel.send({ embeds: [closeEmbed] });
@@ -258,6 +291,10 @@ class Modmail {
               `Your modmail has been closed by ${interaction.user.tag}`
             )
             .setColor("Red")
+            .setFooter({
+              text: settings.bot.footer.text,
+              iconURL: client.user.displayAvatarURL({ dynamic: true }),
+            })
             .setTimestamp();
 
           await user.send({ embeds: [dmEmbed] });
@@ -288,6 +325,14 @@ class Modmail {
 
   async respond(interaction) {
     try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
+
+      await interaction.deferReply({ ephemeral: true });
+
       const threadId = interaction.channel.id;
       const response = interaction.options.getString("message");
 
@@ -371,6 +416,12 @@ class Modmail {
 
   async resolve(interaction) {
     try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
+
       await interaction.deferReply({ ephemeral: true });
 
       const threadId = interaction.channel.id;
@@ -495,54 +546,238 @@ class Modmail {
     }
   }
 
-  async getModmail(user) {
-    const modmail = await ModmailSchema.findOne({
-      guildId: interaction.guild.id,
-      "modmails.author": user.id,
-    });
+  async ban(interaction) {
+    try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
 
-    if (!modmail) {
+      await interaction.deferReply({ ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason");
+
+      const modmail = await ModmailSchema.findOne({
+        guildId: interaction.guild.id,
+      });
+
+      if (!modmail) {
+        return interaction.editReply({
+          content: "No modmail document found for this server.",
+        });
+      }
+
+      const existingBan = modmail.banned.find((ban) => ban.id === user.id);
+      if (existingBan) {
+        return interaction.editReply({
+          content: `${user.tag} is already banned from using modmail.`,
+        });
+      }
+
+      modmail.banned.push({
+        id: user.id,
+        reason,
+        moderator: interaction.user.id,
+        bannedAt: new Date(),
+      });
+
+      const userModmails = modmail.modmails.filter(
+        (m) => m.author === user.id && m.status === "open"
+      );
+
+      if (userModmails.length > 0) {
+        for (const mail of userModmails) {
+          mail.status = "closed";
+          mail.closedAt = new Date();
+
+          const thread = await this.client.channels
+            .fetch(mail.threadId)
+            .catch(() => null);
+          if (thread) {
+            await thread
+              .send({
+                content: `This modmail has been closed as the user has been banned from using modmail.\nReason: ${reason}`,
+              })
+              .catch(() => null);
+          }
+        }
+      }
+
+      await modmail.save();
+
+      try {
+        const dmEmbed = new EmbedBuilder()
+          .setTitle("❌ Modmail Ban")
+          .setDescription("You have been banned from using the modmail system.")
+          .setColor("Red")
+          .addFields([
+            {
+              name: "Reason",
+              value: reason,
+              inline: false,
+            },
+            {
+              name: "Banned By",
+              value: interaction.user.tag,
+              inline: true,
+            },
+            {
+              name: "Banned At",
+              value: `<t:${Math.floor(Date.now() / 1000)}:F>`,
+              inline: true,
+            },
+          ])
+          .setTimestamp();
+
+        await user.send({ embeds: [dmEmbed] }).catch(() => null);
+      } catch (error) {
+        logger.warn(`Could not DM user ${user.tag} about their modmail ban`);
+      }
+
+      return interaction.editReply({
+        content: `Successfully banned ${user.tag} from using modmail.\nReason: ${reason}`,
+      });
+    } catch (error) {
+      logger.error("Error in modmail ban:", error);
+      return interaction.editReply({
+        content: "An error occurred while trying to ban the user from modmail.",
+      });
+    }
+  }
+
+  async unban(interaction) {
+    try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const modmail = await ModmailSchema.findOne({
+        guildId: interaction.guild.id,
+      });
+
+      if (!modmail) {
+        return interaction.editReply({
+          content: "No modmail document found for this server.",
+        });
+      }
+
+      const banIndex = modmail.banned.findIndex((ban) => ban.id === user.id);
+      if (banIndex === -1) {
+        return interaction.editReply({
+          content: `${user.tag} is not banned from using modmail.`,
+        });
+      }
+
+      modmail.banned.splice(banIndex, 1);
+      await modmail.save();
+
+      try {
+        const dmEmbed = new EmbedBuilder()
+          .setTitle("✅ Modmail Unban")
+          .setDescription(
+            "You have been unbanned from using the modmail system."
+          )
+          .setColor("Green")
+          .addFields([
+            {
+              name: "Unbanned By",
+              value: interaction.user.tag,
+              inline: true,
+            },
+            {
+              name: "Unbanned At",
+              value: `<t:${Math.floor(Date.now() / 1000)}:F>`,
+              inline: true,
+            },
+          ])
+          .setTimestamp();
+
+        await user.send({ embeds: [dmEmbed] }).catch(() => null);
+      } catch (error) {
+        logger.warn(`Could not DM user ${user.tag} about their modmail unban`);
+      }
+
+      return interaction.editReply({
+        content: `Successfully unbanned ${user.tag} from using modmail.`,
+      });
+    } catch (error) {
+      logger.error("Error in modmail unban:", error);
+      return interaction.editReply({
+        content:
+          "An error occurred while trying to unban the user from modmail.",
+      });
+    }
+  }
+
+  async getModmail(interaction, user) {
+    try {
+      const hasPerms = await hasPermissions(
+        interaction,
+        this.STAFF_PERMISSIONS
+      );
+      if (!hasPerms) return;
+
+      const modmail = await ModmailSchema.findOne({
+        guildId: interaction.guild.id,
+        "modmails.author": user.id,
+      });
+
+      if (!modmail) {
+        return interaction.reply({
+          content: "No modmail found for this user.",
+          ephemeral: true,
+        });
+      }
+
+      const userModmails = modmail.modmails.filter((m) => m.author === user.id);
+
+      if (!userModmails.length) {
+        return interaction.reply({
+          content: "No modmails found for this user.",
+          ephemeral: true,
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`📬 Modmails for ${user.username}`)
+        .setColor(config.bot.color)
+        .setTimestamp();
+
+      userModmails.forEach((mail) => {
+        embed.addFields({
+          name: `Modmail ID: ${mail.threadId}`,
+          value: `Status: ${mail.status === "open" ? "🟢 Open" : "🔴 Closed"}
+                  Created: <t:${Math.floor(mail.createdAt.getTime() / 1000)}:R>
+                  Messages: ${mail.messages.length}
+                  ${
+                    mail.closedAt
+                      ? `Closed: <t:${Math.floor(
+                          mail.closedAt.getTime() / 1000
+                        )}:R>`
+                      : ""
+                  }`,
+          inline: false,
+        });
+      });
+
       return interaction.reply({
-        content: "No modmail found for this user.",
+        embeds: [embed],
+        ephemeral: true,
+      });
+    } catch (error) {
+      logger.error(error);
+      return interaction.reply({
+        content: "An error occurred while fetching modmail information.",
         ephemeral: true,
       });
     }
-
-    const userModmails = modmail.modmails.filter((m) => m.author === user.id);
-
-    if (!userModmails.length) {
-      return interaction.reply({
-        content: "No modmails found for this user.",
-        ephemeral: true,
-      });
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle(`📬 Modmails for ${user.username}`)
-      .setColor(config.bot.color)
-      .setTimestamp();
-
-    userModmails.forEach((mail) => {
-      embed.addFields({
-        name: `Modmail ID: ${mail.threadId}`,
-        value: `Status: ${mail.status === "open" ? "🟢 Open" : "🔴 Closed"}
-                Created: <t:${Math.floor(mail.createdAt.getTime() / 1000)}:R>
-                Messages: ${mail.messages.length}
-                ${
-                  mail.closedAt
-                    ? `Closed: <t:${Math.floor(
-                        mail.closedAt.getTime() / 1000
-                      )}:R>`
-                    : ""
-                }`,
-        inline: false,
-      });
-    });
-
-    return interaction.reply({
-      embeds: [embed],
-      ephemeral: true,
-    });
   }
 
   async handleDMResponse(message) {

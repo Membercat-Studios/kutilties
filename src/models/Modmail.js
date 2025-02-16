@@ -23,6 +23,19 @@ const modmailSchema = new Schema({
       ],
     },
   ],
+  banned: [
+    {
+      id: { type: String },
+      reason: { type: String },
+      moderator: { type: String },
+      bannedAt: { type: Date, default: Date.now() },
+    },
+  ],
+  cooldowns: {
+    type: Map,
+    of: Date,
+    default: new Map(),
+  },
 });
 
 module.exports = model("bot_modmail", modmailSchema);
