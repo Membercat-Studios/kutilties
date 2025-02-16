@@ -29,7 +29,7 @@ const client = new Client({
   ],
   partials: [Partials.Channel, Partials.Message],
 });
-client.commandsSinceLastStartup = new Map();
+client.commandsSinceLastStartup = new Collection();
 
 const eventsDir = path.join(__dirname, "/events");
 const commandsDir = path.join(__dirname, "/commands");
@@ -134,7 +134,7 @@ client.on("interactionCreate", async (interaction) => {
     logger.info(
       `${interaction.user.username} executed command /${interaction.commandName}`
     );
-    commandsSinceLastStartup.set(
+    client.commandsSinceLastStartup.set(
       new Date().toISOString(),
       interaction.commandName
     );
