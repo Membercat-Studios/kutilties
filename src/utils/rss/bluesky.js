@@ -10,7 +10,7 @@ async function parse(client) {
     const parser = new Parser();
 
     if (rss.bluesky && rss.bluesky.length > 0) {
-      for (const blueskyAccount of rss.bluesky) {
+      for (let blueskyAccount of rss.bluesky) {
         if (!settings || !settings.bluesky.enabled) {
           logger.warn("BlueSky RSS is not enabled. Skipping...");
           continue;

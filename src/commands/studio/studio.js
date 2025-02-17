@@ -5,9 +5,15 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { teamInfo, projectInfo } = require("@utils/modrinth-api");
+const {
+  teamInfo,
+  teamProjects,
+  projectInfo,
+  teamMembers,
+} = require("@utils/modrinth-api");
 const logger = require("@logger");
 const cache = require("@cache");
+const Settings = require("@models/Settings");
 
 const CACHE_KEYS = {
   TEAM_PROJECTS: "membercat_team_projects",
@@ -33,45 +39,95 @@ module.exports = {
         )
     ),
 
-  async execute(interaction) {
+  async execute(interaction, client) {
+    await interaction.deferReply();
     const subcommand = interaction.options.getSubcommand();
 
     try {
       if (subcommand === "info") {
-        const team = await teamInfo();
-        if (!team) {
-          return interaction.reply({
-            content:
-              "Failed to fetch studio information. Please try again later.",
+        const settings = await Settings.findOne();
+
+        let projectsData = cache.get(CACHE_KEYS.TEAM_PROJECTS);
+        let membersData = cache.get("modrinth_team_members");
+
+        if (!projectsData) {
+          projectsData = await teamProjects();
+          if (projectsData) {
+            cache.set(CACHE_KEYS.TEAM_PROJECTS, projectsData, 5 * 60 * 1000);
+          }
+        }
+
+        if (!membersData) {
+          membersData = await teamMembers();
+          if (membersData) {
+            cache.set("modrinth_team_members", membersData, 5 * 60 * 1000);
+          }
+        }
+
+        if (!membersData || !projectsData) {
+          return interaction.editReply({
+            content: "Failed to fetch studio data. Please try again later.",
             ephemeral: true,
           });
         }
 
+        const teamMembersList = membersData
+          .map(
+            (member) =>
+              `[${member.user.username}](https://modrinth.com/user/${member.user.id})`
+          )
+          .join("\n");
+
+        const projects = projectsData
+          .map(
+            (project) =>
+              `[${project.name}](https://modrinth.com/project/${project.slug})`
+          )
+          .join("\n");
+
+        const totalDownloads = projectsData
+          .map((project) => project.downloads)
+          .reduce((a, b) => a + b, 0)
+          .toLocaleString();
+
         const embed = new EmbedBuilder()
           .setTitle("Membercat Studios")
-          .setDescription(team.description || "No description available")
-          .setThumbnail(team.icon_url || null)
-          .addFields([
+          .setThumbnail(client.user.displayAvatarURL({ dynamic: true }))
+          .setColor(settings.bot.color || "White")
+          .setDescription(
+            `Welcome to Membercat Studios! Here, we release quality resources into the world via Modrinth.`
+          )
+          .addFields(
             {
               name: "Projects",
-              value: `${team.projects?.length || 0} published projects`,
+              value: projects || "No projects found",
               inline: true,
             },
             {
-              name: "Members",
-              value: `${team.members?.length || 0} team members`,
+              name: "Meet the Team",
+              value: teamMembersList || "No team members found",
               inline: true,
             },
             {
-              name: "Created",
-              value: `<t:${Math.floor(
-                new Date(team.created).getTime() / 1000
-              )}:R>`,
+              name: "Our Modrinth Page",
+              value: `[Found Here](https://modrinth.com/organization/membercat)`,
               inline: true,
             },
-          ])
-          .setColor("#00ff00")
-          .setTimestamp();
+            {
+              name: "Total Downloads",
+              value: totalDownloads,
+              inline: true,
+            },
+            {
+              name: "Project Count",
+              value: `${projectsData.length}`,
+              inline: true,
+            }
+          )
+          .setFooter({
+            text: `Membercat Studios`,
+            iconURL: client.user.displayAvatarURL(),
+          });
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -80,7 +136,7 @@ module.exports = {
             .setStyle(ButtonStyle.Link)
         );
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [embed],
           components: [row],
         });
@@ -88,10 +144,18 @@ module.exports = {
 
       if (subcommand === "project") {
         const projectId = interaction.options.getString("id");
-        const project = await projectInfo(projectId);
+        const cacheKey = `modrinth_project_${projectId}`;
+
+        let project = cache.get(cacheKey);
+        if (!project) {
+          project = await projectInfo(projectId);
+          if (project) {
+            cache.set(cacheKey, project, 5 * 60 * 1000);
+          }
+        }
 
         if (!project) {
-          return interaction.reply({
+          return interaction.editReply({
             content:
               "Failed to fetch project information. Please try again later.",
             ephemeral: true,
@@ -141,14 +205,14 @@ module.exports = {
             .setStyle(ButtonStyle.Link)
         );
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [embed],
           components: [row],
         });
       }
     } catch (error) {
-      logger.error("Error in studio command:", error);
-      return interaction.reply({
+      logger.error(`Error in studio command: ${error}`);
+      return interaction.editReply({
         content: "An error occurred while executing the command.",
         ephemeral: true,
       });

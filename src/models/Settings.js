@@ -12,7 +12,9 @@ const settingsSchema = new Schema({
     logging: { type: String, default: "1288652816830959617" },
     modmail: { type: String, default: "1336549338972946462" },
     posts: { type: String },
+    feed: { type: String },
     uploads: { type: String },
+    stream: { type: String },
   },
   membercat: {
     updater: {
@@ -22,9 +24,18 @@ const settingsSchema = new Schema({
     },
   },
   features: {
-    bluesky: { enabled: { type: Boolean, default: false } },
-    instagram: { enabled: { type: Boolean, default: false } },
-    youtube: { enabled: { type: Boolean, default: false } },
+    bluesky: {
+      enabled: { type: Boolean, default: false },
+      accounts: { type: Array, default: [] },
+    },
+    instagram: {
+      enabled: { type: Boolean, default: false },
+      accounts: { type: Array, default: [] },
+    },
+    youtube: {
+      enabled: { type: Boolean, default: false },
+      accounts: { type: Array, default: [] },
+    },
   },
   modmail: {
     cooldownSeconds: { type: Number, default: 3600 },
